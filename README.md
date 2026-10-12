@@ -150,6 +150,7 @@ services:
 | **Sales & CRM** | Salesforce, HubSpot |
 | **Web** | Website / Sitemap crawler |
 | **Research** | Zotero |
+| **Documents** | Paperless-ngx |
 
 ```bash
 oikb sync github:owner/repo --kb-id your-kb-id
@@ -185,6 +186,19 @@ Options:
 | `ZOTERO_UNFILED_DIR` | Directory for root library items, default `_unfiled` |
 | `ZOTERO_WEBDAV_URL` | WebDAV Zotero storage base; fetches `<attachment-key>.zip` on Zotero file 404 |
 | `ZOTERO_WEBDAV_USER` / `ZOTERO_WEBDAV_PASSWORD` | WebDAV credentials |
+
+### Paperless-ngx
+
+```bash
+export PAPERLESS_TOKEN=your-api-token
+
+oikb sync "paperless:https://paperless.example.com" --kb-id your-kb-id
+oikb sync "paperless:https://paperless.example.com?tags=invoice,contract" --kb-id your-kb-id
+```
+
+Uploads each document's text as `<correspondent>/<year>/<id>_<title>.txt`,
+with `doc_date`, `correspondent`, `document_type`, `tags` and a link back to
+Paperless as file metadata. See the [guide](docs/guide.md#paperless-ngx).
 
 ## Filters
 

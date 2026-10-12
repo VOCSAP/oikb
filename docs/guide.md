@@ -485,6 +485,31 @@ Optional settings:
 | `ZOTERO_WEBDAV_URL` | WebDAV Zotero storage base; fetches `<attachment-key>.zip` on Zotero file 404 |
 | `ZOTERO_WEBDAV_USER` / `ZOTERO_WEBDAV_PASSWORD` | WebDAV credentials |
 
+### Paperless-ngx
+
+Sync the text of Paperless-ngx documents (OCR or embedded text) as `.txt`
+files laid out as `<correspondent>/<year>/<id>_<title>.txt`:
+
+```bash
+export PAPERLESS_TOKEN=your-api-token
+
+oikb sync "paperless:https://paperless.example.com" --kb-id your-kb-id
+oikb sync "paperless:https://paperless.example.com?tags=invoice,contract" --kb-id your-kb-id
+oikb sync "paperless:https://paperless.example.com?document_types=Contract&page_size=50" --kb-id your-kb-id
+```
+
+A bare `paperless:` reads the base URL from `PAPERLESS_URL`. `tags` keeps
+documents carrying at least one of the listed tag names, `document_types`
+keeps the listed document types (both case-insensitive). A token of a
+read-only Paperless user is enough.
+
+Each file is uploaded with metadata taken from the document: `doc_date`
+(the `created` date), `added`, `modified`, `correspondent`, `document_type`,
+`tags` (comma-separated names), `paperless_id`, `paperless_url`. The
+checksum covers the document text, correspondent, document type, tags and
+created date, so editing any of them re-uploads the document with fresh
+metadata; a title change renames the file.
+
 ### All Connectors
 
 46 connectors available. See the full list:
@@ -501,6 +526,7 @@ Optional settings:
 | **Sales & CRM** | Salesforce, HubSpot |
 | **Web** | Website / Sitemap crawler |
 | **Research** | Zotero |
+| **Documents** | Paperless-ngx |
 
 ---
 

@@ -317,6 +317,11 @@ def _resolve_connector(
         parsed = parse_zotero_source(source)
         return ZoteroConnector(hierarchy=parsed.get("hierarchy"), library_id=parsed.get("library_id"))
 
+    if source.startswith("paperless:"):
+        from oikb.connectors.paperless import PaperlessConnector, parse_paperless_source
+        parsed = parse_paperless_source(source)
+        return PaperlessConnector(**{**parsed, **auth})
+
     # Default: local filesystem.
     from oikb.connectors.filesystem import FilesystemConnector
     return FilesystemConnector(source)
