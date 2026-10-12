@@ -244,8 +244,34 @@ def test_failed_processing_counts_as_pass_error():
     client.get_file.return_value = {"id": "f", "data": {"status": "failed", "error": "embedding timeout"}}
     result, _ = _timed_sync(client)
     client.get_file.assert_called_once_with("f")
+    client.delete_file.assert_called_once_with("f")
     assert result.added == 0
     assert len(result.errors) == 1 and "embedding timeout" in result.errors[0]
+
+
+def test_failed_file_is_retried_once_per_pass():
+    client = _slow_upload_client(0)
+    client.get_file.return_value = {"id": "f", "data": {"status": "failed"}}
+    for expected_uploads in (1, 2):
+        result, _ = _timed_sync(client)
+        assert client.upload_file.call_count == expected_uploads
+        assert len(result.errors) == 1
+
+
+def test_orphan_delete_failure_is_reported_in_the_error():
+    client = _slow_upload_client(0)
+    client.get_file.return_value = {"id": "f", "data": {"status": "failed", "error": "bad pdf"}}
+    client.delete_file.side_effect = RuntimeError("boom")
+    result, _ = _timed_sync(client)
+    assert "bad pdf" in result.errors[0] and "orphan file f not deleted: boom" in result.errors[0]
+    client.upload_file.assert_called_once()
+
+
+@respx.mock
+def test_delete_file_calls_files_endpoint():
+    route = respx.delete("https://webui.example/api/v1/files/f").mock(return_value=httpx.Response(200, json={}))
+    OikbClient("https://webui.example", "token").delete_file("f")
+    assert route.called
 
 
 def test_failed_status_check_does_not_reupload():

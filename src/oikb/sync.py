@@ -335,10 +335,19 @@ def _run_sync_inner(
         return result
 
     def _processing_error(uploaded: dict[str, Any]) -> str | None:
-        data = client.get_file(uploaded.get("id")).get("data") or {}
-        if data.get("status") == "failed":
-            return f"processing failed: {data.get('error') or 'no detail'}"
-        return None
+        file_id = uploaded.get("id")
+        data = client.get_file(file_id).get("data") or {}
+        if data.get("status") != "failed":
+            return None
+        error = f"processing failed: {data.get('error') or 'no detail'}"
+        # Open WebUI links a file to the KB only once processing succeeds, so
+        # the next diff lists it as added again; without this delete every
+        # retry would leave one more orphan file record behind.
+        try:
+            client.delete_file(file_id)
+        except Exception as e:
+            error += f" (orphan file {file_id} not deleted: {e})"
+        return error
 
     def _pace(elapsed: float) -> None:
         """Idle so uploads use at most ``upload_duty`` of wall time."""

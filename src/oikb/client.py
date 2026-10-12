@@ -129,6 +129,11 @@ class OikbClient:
         resp.raise_for_status()
         return resp.json()
 
+    def delete_file(self, file_id: str) -> None:
+        """DELETE /files/{id} -- file record, storage and its vectors."""
+        resp = self._http.delete(f"/files/{file_id}")
+        resp.raise_for_status()
+
     # ── Directory management ────────────────────────────────────
 
     def create_directory(
