@@ -23,6 +23,13 @@ def group_entries_by_kb(entries: list[dict]) -> list[list[dict]]:
     return list(groups.values())
 
 
+def _upload_duty(entry: dict) -> float:
+    value = entry.get("upload-duty", 1.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 1:
+        raise ValueError(f"upload-duty must be a number in ]0, 1], got {value!r}")
+    return float(value)
+
+
 class _CombinedConnector(BaseConnector):
     def __init__(
         self,
@@ -61,6 +68,7 @@ def run_entries_sync(
     groups = group_entries_by_kb(entries)
     if len(groups) != 1:
         raise ValueError("Expected sources for exactly one KB")
+    upload_duty = min(_upload_duty(entry) for entry in entries)
     manifest: list[ManifestEntry] = []
     routes: dict[tuple[str, str], tuple[BaseConnector, str]] = {}
     with ExitStack() as stack:
@@ -103,6 +111,9 @@ def run_entries_sync(
             dry_run=dry_run,
             verbose=verbose,
             quiet=quiet,
+            # Sources sharing a KB take the most parallel concurrency but the
+            # most cautious upload-duty.
             concurrency=max(entry.get("concurrency", concurrency) for entry in entries),
             cancel_requested=cancel_requested,
+            upload_duty=upload_duty,
         )

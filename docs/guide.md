@@ -940,6 +940,14 @@ You're running `oikb sync` without arguments and there's no `.oikb.yaml` in the 
 - Set `filter.max-size: 50mb` to skip large binaries
 - Use `filter.exclude` to skip unnecessary files
 
+### Open WebUI saturates during large syncs
+
+Each upload waits for Open WebUI to finish processing the file (extraction and
+embeddings). Set `upload-duty: 0.5` on the entry to idle as long as each upload
+took, leaving the server free half the time. The value must be in ]0, 1]; `1`
+(the default) never idles. Sources sharing a KB use the smallest value. A file
+whose processing fails is reported as a sync error.
+
 ### Daemon won't start
 
 ```bash

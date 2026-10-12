@@ -17,6 +17,8 @@ _TEXT_TYPES = {".md": "text/markdown", ".markdown": "text/markdown"}
 
 _RESERVED_METADATA_KEYS = frozenset({"knowledge_id", "file_hash", "directory_id"})
 
+_UPLOAD_READ_TIMEOUT = 900.0
+
 
 def _content_type(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
@@ -105,11 +107,25 @@ class OikbClient:
             }
             metadata = extra | metadata
 
+        # Background processing returns before embedding, so a serial uploader
+        # would pile up tasks server-side with no backpressure.
+        timeout = self._http.timeout
         resp = self._http.post(
             "/files/",
+            params={"process_in_background": "false"},
             files={"file": (filename, file_content, _content_type(filename))},
             data={"metadata": json.dumps(metadata)},
+            timeout=httpx.Timeout(
+                connect=timeout.connect, read=_UPLOAD_READ_TIMEOUT,
+                write=timeout.write, pool=timeout.pool,
+            ),
         )
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_file(self, file_id: str) -> dict[str, Any]:
+        """GET /files/{id} -- file record, processing state in ``data.status``."""
+        resp = self._http.get(f"/files/{file_id}")
         resp.raise_for_status()
         return resp.json()
 

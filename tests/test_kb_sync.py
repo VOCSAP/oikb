@@ -1,5 +1,7 @@
 import json
 import mimetypes
+import threading
+import time
 from unittest.mock import AsyncMock, Mock
 
 import httpx
@@ -178,6 +180,81 @@ def test_manifest_metadata_reaches_upload_without_overriding_reserved_keys():
 
 def test_manifest_metadata_is_not_sent_for_diffing():
     assert "metadata" not in ManifestEntry("a.txt", "", "h", 1, metadata={"k": "v"}).to_dict()
+
+
+@respx.mock
+def test_upload_waits_for_processing_with_long_read_timeout():
+    route = respx.post("https://webui.example/api/v1/files/").mock(return_value=httpx.Response(200, json={"id": "f"}))
+    OikbClient("https://webui.example", "token").upload_file(b"a", "a.txt", "kb", "hash")
+    request = route.calls.last.request
+    assert request.url.params["process_in_background"] == "false"
+    assert request.extensions["timeout"]["read"] == 900.0
+
+
+def _slow_upload_client(seconds):
+    client = Mock()
+    client.sync_diff.side_effect = lambda kb, manifest: {"added": manifest}
+    client.upload_file.side_effect = lambda **kw: time.sleep(seconds) or {"id": "f"}
+    client.get_file.return_value = {"id": "f", "data": {"status": "completed"}}
+    return client
+
+
+def _timed_sync(client, cancel_requested=None, **entry):
+    started = time.monotonic()
+    result = run_entries_sync(
+        client, [{"source": "one", "kb-id": "kb", **entry}],
+        resolve_connector=lambda *a, **kw: Source({"a.txt": b"a"}), quiet=True,
+        cancel_requested=cancel_requested,
+    )
+    return result, time.monotonic() - started
+
+
+def test_upload_duty_idles_in_proportion_to_upload_time():
+    result, elapsed = _timed_sync(_slow_upload_client(0.3), **{"upload-duty": 0.5})
+    assert result.added == 1
+    assert 0.55 <= elapsed < 1.2
+
+
+def test_full_upload_duty_does_not_idle():
+    result, elapsed = _timed_sync(_slow_upload_client(0.3), **{"upload-duty": 1.0})
+    assert result.added == 1
+    assert elapsed < 0.5
+
+
+def test_cancel_interrupts_upload_duty_idle():
+    client = _slow_upload_client(0.1)
+    stop = threading.Event()
+    threading.Timer(0.3, stop.set).start()
+    started = time.monotonic()
+    with pytest.raises(SyncCancelled):
+        _timed_sync(client, cancel_requested=stop.is_set, **{"upload-duty": 0.01})
+    assert time.monotonic() - started < 0.3 + 0.5
+
+
+@pytest.mark.parametrize("duty", [0, -0.5, 1.5, "0.5", True])
+def test_invalid_upload_duty_rejected_before_any_kb_call(duty):
+    client, resolver = Mock(), Mock()
+    with pytest.raises(ValueError, match="upload-duty"):
+        run_entries_sync(client, [{"source": "one", "kb-id": "kb", "upload-duty": duty}], resolve_connector=resolver)
+    assert not client.mock_calls and not resolver.mock_calls
+
+
+def test_failed_processing_counts_as_pass_error():
+    client = _slow_upload_client(0)
+    client.get_file.return_value = {"id": "f", "data": {"status": "failed", "error": "embedding timeout"}}
+    result, _ = _timed_sync(client)
+    client.get_file.assert_called_once_with("f")
+    assert result.added == 0
+    assert len(result.errors) == 1 and "embedding timeout" in result.errors[0]
+
+
+def test_failed_status_check_does_not_reupload():
+    client = _slow_upload_client(0)
+    response = httpx.Response(503, request=httpx.Request("GET", "https://webui.example/files/f"))
+    client.get_file.side_effect = httpx.HTTPStatusError("Unavailable", request=response.request, response=response)
+    result, _ = _timed_sync(client)
+    client.upload_file.assert_called_once()
+    assert result.added == 0 and "status check failed" in result.errors[0]
 
 
 @respx.mock

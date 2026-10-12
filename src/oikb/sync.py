@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fnmatch
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -25,6 +26,8 @@ from oikb.connectors import BaseConnector, ManifestEntry, SourceFileUnavailable
 
 # Stderr console for progress output (keeps stdout clean for piping).
 _console = Console(stderr=True)
+
+_PACE_SLICE = 0.2
 
 
 @dataclass
@@ -141,6 +144,7 @@ def run_sync(
     manifest_filter: Callable[[list[ManifestEntry]], list[ManifestEntry]] | None = None,
     concurrency: int = 1,
     cancel_requested: Callable[[], bool] | None = None,
+    upload_duty: float = 1.0,
 ) -> SyncResult:
     """Execute a full incremental sync.
 
@@ -159,7 +163,7 @@ def run_sync(
     try:
         return _run_sync_inner(
             client, connector, kb_id, dry_run, verbose, quiet,
-            manifest_filter, concurrency, result, cancel_requested,
+            manifest_filter, concurrency, result, cancel_requested, upload_duty,
         )
     finally:
         connector.close()
@@ -176,6 +180,7 @@ def _run_sync_inner(
     concurrency: int,
     result: SyncResult,
     cancel_requested: Callable[[], bool] | None,
+    upload_duty: float,
 ) -> SyncResult:
     """Inner sync logic, separated for clean connector cleanup."""
     show_progress = not quiet and not dry_run
@@ -329,6 +334,20 @@ def _run_sync_inner(
     if not files_to_upload:
         return result
 
+    def _processing_error(uploaded: dict[str, Any]) -> str | None:
+        data = client.get_file(uploaded.get("id")).get("data") or {}
+        if data.get("status") == "failed":
+            return f"processing failed: {data.get('error') or 'no detail'}"
+        return None
+
+    def _pace(elapsed: float) -> None:
+        """Idle so uploads use at most ``upload_duty`` of wall time."""
+        deadline = time.monotonic() + elapsed * (1 / upload_duty - 1)
+        idle = threading.Event()
+        while (remaining := deadline - time.monotonic()) > 0:
+            check_stop()
+            idle.wait(min(remaining, _PACE_SLICE))
+
     def _upload_one(
         i: int, entry: dict, change_type: str, progress: Progress | None, task_id: Any,
     ) -> tuple[str, str | None]:
@@ -345,7 +364,9 @@ def _run_sync_inner(
         if not manifest_entry:
             return ("error", f"File not in manifest: {display}")
 
-        last_err: Exception | None = None
+        last_err: Exception | str | None = None
+        uploaded: dict[str, Any] | None = None
+        elapsed = 0.0
         for attempt in range(3):
             check_stop()
             try:
@@ -358,7 +379,8 @@ def _run_sync_inner(
                     return ("warning", f"{display}: empty content, skipping")
                 check_stop()
                 directory_id = directory_map.get(path) if path else None
-                client.upload_file(
+                started = time.monotonic()
+                uploaded = client.upload_file(
                     file_content=content,
                     filename=filename,
                     kb_id=kb_id,
@@ -366,9 +388,8 @@ def _run_sync_inner(
                     directory_id=directory_id,
                     extra_metadata=manifest_entry.metadata,
                 )
-                if progress is not None:
-                    progress.update(task_id, advance=1, description=f"[cyan]{display}[/cyan]")
-                return (change_type, None)
+                elapsed = time.monotonic() - started
+                break
             except SourceFileUnavailable as e:
                 message = f"{display}: {e}"
                 if progress is not None:
@@ -396,6 +417,19 @@ def _run_sync_inner(
             except Exception as e:
                 last_err = e
                 break
+
+        # Outside the retry loop: a failing status check must not re-upload a
+        # file the server already stored.
+        if uploaded is not None:
+            try:
+                last_err = _processing_error(uploaded)
+            except Exception as e:
+                last_err = f"status check failed: {e}"
+            _pace(elapsed)
+            if last_err is None:
+                if progress is not None:
+                    progress.update(task_id, advance=1, description=f"[cyan]{display}[/cyan]")
+                return (change_type, None)
 
         if progress is not None:
             progress.update(task_id, advance=1, description=f"[red]✗ {display}[/red]")
