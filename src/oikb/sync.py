@@ -349,9 +349,11 @@ def _run_sync_inner(
             error += f" (orphan file {file_id} not deleted: {e})"
         return error
 
+    workers = max(1, min(concurrency, len(files_to_upload)))
+
     def _pace(elapsed: float) -> None:
-        """Idle so uploads use at most ``upload_duty`` of wall time."""
-        deadline = time.monotonic() + elapsed * (1 / upload_duty - 1)
+        """Idle so the KB's uploads keep the server busy at most ``upload_duty`` of wall time."""
+        deadline = time.monotonic() + elapsed * (workers / upload_duty - 1)
         idle = threading.Event()
         while (remaining := deadline - time.monotonic()) > 0:
             check_stop()
@@ -389,14 +391,19 @@ def _run_sync_inner(
                 check_stop()
                 directory_id = directory_map.get(path) if path else None
                 started = time.monotonic()
-                uploaded = client.upload_file(
-                    file_content=content,
-                    filename=filename,
-                    kb_id=kb_id,
-                    file_hash=manifest_entry.checksum,
-                    directory_id=directory_id,
-                    extra_metadata=manifest_entry.metadata,
-                )
+                try:
+                    uploaded = client.upload_file(
+                        file_content=content,
+                        filename=filename,
+                        kb_id=kb_id,
+                        file_hash=manifest_entry.checksum,
+                        directory_id=directory_id,
+                        extra_metadata=manifest_entry.metadata,
+                    )
+                except httpx.ReadTimeout:
+                    # The server keeps processing the file after we disconnect.
+                    _pace(time.monotonic() - started)
+                    raise
                 elapsed = time.monotonic() - started
                 break
             except SourceFileUnavailable as e:

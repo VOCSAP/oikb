@@ -943,10 +943,20 @@ You're running `oikb sync` without arguments and there's no `.oikb.yaml` in the 
 ### Open WebUI saturates during large syncs
 
 Each upload waits for Open WebUI to finish processing the file (extraction and
-embeddings). Set `upload-duty: 0.5` on the entry to idle as long as each upload
-took, leaving the server free half the time. The value must be in ]0, 1]; `1`
-(the default) never idles. Sources sharing a KB use the smallest value. A file
-whose processing fails is reported as a sync error.
+embeddings). Set `upload-duty: 0.5` on the entry to keep the server busy with
+this KB at most half the time: after each upload the sync idles in proportion
+to how long it took, scaled by `concurrency` so the share holds for the whole
+KB. An upload that hits the 900 s read timeout idles too, since the server keeps
+processing after the client gives up. The value must be in ]0, 1]; `1` (the
+default) never idles. Sources sharing a KB use the smallest value.
+`upload-duty` is read from `.oikb.yaml` only: a single-source
+`oikb sync SOURCE --kb-id ID` and `oikb watch` ignore it.
+
+A file whose processing fails is reported as a sync error and deleted from
+Open WebUI, so the next sync uploads it again. One rare case is not cleaned
+up: if processing succeeds but linking the file to the KB then fails, its
+vectors stay in the KB collection without a file, and can still surface in
+retrieval until the KB is reset (`oikb reset`).
 
 ### Daemon won't start
 

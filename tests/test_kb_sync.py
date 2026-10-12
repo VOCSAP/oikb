@@ -199,11 +199,11 @@ def _slow_upload_client(seconds):
     return client
 
 
-def _timed_sync(client, cancel_requested=None, **entry):
+def _timed_sync(client, cancel_requested=None, files=None, **entry):
     started = time.monotonic()
     result = run_entries_sync(
         client, [{"source": "one", "kb-id": "kb", **entry}],
-        resolve_connector=lambda *a, **kw: Source({"a.txt": b"a"}), quiet=True,
+        resolve_connector=lambda *a, **kw: Source(files or {"a.txt": b"a"}), quiet=True,
         cancel_requested=cancel_requested,
     )
     return result, time.monotonic() - started
@@ -213,6 +213,30 @@ def test_upload_duty_idles_in_proportion_to_upload_time():
     result, elapsed = _timed_sync(_slow_upload_client(0.3), **{"upload-duty": 0.5})
     assert result.added == 1
     assert 0.55 <= elapsed < 1.2
+
+
+def test_upload_duty_applies_to_the_whole_kb_across_workers():
+    # Two workers at duty 0.5: each idles 0.2 * (2 / 0.5 - 1) = 0.6 s after its 0.2 s upload.
+    result, elapsed = _timed_sync(
+        _slow_upload_client(0.2), files={"a.txt": b"a", "b.txt": b"b"},
+        concurrency=2, **{"upload-duty": 0.5},
+    )
+    assert result.added == 2
+    assert 0.75 <= elapsed < 1.5
+
+
+def test_read_timeout_still_idles_before_reporting_the_error():
+    client = _slow_upload_client(0)
+
+    def timeout(**kw):
+        time.sleep(0.3)
+        raise httpx.ReadTimeout("read timed out")
+
+    client.upload_file.side_effect = timeout
+    result, elapsed = _timed_sync(client, **{"upload-duty": 0.5})
+    client.upload_file.assert_called_once()
+    assert result.added == 0 and "read timed out" in result.errors[0]
+    assert elapsed >= 0.55
 
 
 def test_full_upload_duty_does_not_idle():
