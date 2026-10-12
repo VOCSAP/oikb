@@ -1,6 +1,6 @@
 FROM python:3.11-slim-bookworm AS builder
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.10.4@sha256:4cac394b6b72846f8a85a7a0e577c6d61d4e17fe2ccee65d9451a8b3c9efb4ac /uv /uvx /bin/
 
 ENV UV_LINK_MODE=copy
 
@@ -8,13 +8,14 @@ WORKDIR /app
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --extra all --no-install-project --no-dev
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    uv sync --locked --extra all --no-install-project --no-dev
 
-COPY pyproject.toml LICENSE README.md ./
+COPY pyproject.toml uv.lock LICENSE README.md ./
 COPY src/ ./src/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --extra all --no-dev
+    uv sync --locked --extra all --no-dev
 
 
 FROM python:3.11-slim-bookworm
