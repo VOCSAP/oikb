@@ -353,6 +353,8 @@ def _run_sync_inner(
 
     def _pace(elapsed: float) -> None:
         """Idle so the KB's uploads keep the server busy at most ``upload_duty`` of wall time."""
+        if upload_duty >= 1:
+            return
         deadline = time.monotonic() + elapsed * (workers / upload_duty - 1)
         idle = threading.Event()
         while (remaining := deadline - time.monotonic()) > 0:

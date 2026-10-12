@@ -225,6 +225,15 @@ def test_upload_duty_applies_to_the_whole_kb_across_workers():
     assert 0.75 <= elapsed < 1.5
 
 
+def test_default_upload_duty_never_idles_with_concurrency():
+    result, elapsed = _timed_sync(
+        _slow_upload_client(0.05), files={f"{i}.txt": b"x" for i in range(8)},
+        concurrency=2,
+    )
+    assert result.added == 8
+    assert elapsed < 0.3
+
+
 def test_read_timeout_still_idles_before_reporting_the_error():
     client = _slow_upload_client(0)
 
