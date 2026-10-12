@@ -1,3 +1,4 @@
+import json
 import mimetypes
 from unittest.mock import AsyncMock, Mock
 
@@ -148,6 +149,35 @@ def test_upload_error_includes_server_detail():
     client.upload_file.side_effect = httpx.HTTPStatusError("Bad Request", request=response.request, response=response)
     result = run_entries_sync(client, [{"source": "one", "kb-id": "kb"}], resolve_connector=lambda *a, **kw: Source({"a.txt": b"a"}), quiet=True)
     assert "extraction failed" in result.errors[0]
+
+
+class MetadataSource(Source):
+    def build_manifest(self):
+        return [
+            ManifestEntry("a.txt", "", "h", 1, metadata={"doc_date": "2026-03-14", "knowledge_id": "spoofed"}),
+            ManifestEntry("b.txt", "", "h", 1),
+        ]
+
+
+@respx.mock
+def test_manifest_metadata_reaches_upload_without_overriding_reserved_keys():
+    respx.post("https://webui.example/api/v1/knowledge/kb/sync/diff").mock(
+        side_effect=lambda request: httpx.Response(200, json={"added": json.loads(request.content)["manifest"]})
+    )
+    uploads = respx.post("https://webui.example/api/v1/files/").mock(return_value=httpx.Response(200, json={"id": "f"}))
+    source = MetadataSource({"a.txt": b"a", "b.txt": b"b"})
+    run_entries_sync(OikbClient("https://webui.example", "token"), [{"source": "one", "kb-id": "kb"}], resolve_connector=lambda *a, **kw: source, quiet=True)
+    sent = {}
+    for call in uploads.calls:
+        body = call.request.content.decode()
+        name = "a.txt" if 'filename="a.txt"' in body else "b.txt"
+        sent[name] = json.loads(body.split('name="metadata"\r\n\r\n', 1)[1].split("\r\n--", 1)[0])
+    assert sent["a.txt"] == {"doc_date": "2026-03-14", "knowledge_id": "kb", "file_hash": "h"}
+    assert sent["b.txt"] == {"knowledge_id": "kb", "file_hash": "h"}
+
+
+def test_manifest_metadata_is_not_sent_for_diffing():
+    assert "metadata" not in ManifestEntry("a.txt", "", "h", 1, metadata={"k": "v"}).to_dict()
 
 
 @respx.mock

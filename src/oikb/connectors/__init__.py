@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,12 +17,15 @@ class ManifestEntry:
                   Empty string for root-level files.
         checksum: SHA-256 hex digest of the file content.
         size:     File size in bytes.
+        metadata: Optional extra keys merged into the upload metadata of
+                  the file. Not part of the manifest sent for diffing.
     """
 
     filename: str
     path: str
     checksum: str
     size: int
+    metadata: dict[str, Any] | None = field(default=None, hash=False)
 
     def to_dict(self) -> dict:
         return {

@@ -364,6 +364,7 @@ def _run_sync_inner(
                     kb_id=kb_id,
                     file_hash=manifest_entry.checksum,
                     directory_id=directory_id,
+                    extra_metadata=manifest_entry.metadata,
                 )
                 if progress is not None:
                     progress.update(task_id, advance=1, description=f"[cyan]{display}[/cyan]")

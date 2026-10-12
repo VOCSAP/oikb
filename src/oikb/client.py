@@ -15,6 +15,8 @@ import httpx
 # to its document extraction engine (Docling, Tika) instead of reading it as text.
 _TEXT_TYPES = {".md": "text/markdown", ".markdown": "text/markdown"}
 
+_RESERVED_METADATA_KEYS = frozenset({"knowledge_id", "file_hash", "directory_id"})
+
 
 def _content_type(filename: str) -> str:
     ext = os.path.splitext(filename)[1].lower()
@@ -85,6 +87,7 @@ class OikbClient:
         kb_id: str,
         file_hash: str,
         directory_id: str | None = None,
+        extra_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """POST /files/ — upload a single file to the KB."""
 
@@ -94,6 +97,13 @@ class OikbClient:
         }
         if directory_id:
             metadata["directory_id"] = directory_id
+        if extra_metadata:
+            extra = {
+                key: value
+                for key, value in extra_metadata.items()
+                if key not in _RESERVED_METADATA_KEYS
+            }
+            metadata = extra | metadata
 
         resp = self._http.post(
             "/files/",
